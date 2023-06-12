@@ -1,0 +1,142 @@
+from torch.utils.data import DataLoader, Dataset
+import os
+import cv2
+import numpy as np
+from PIL import Image
+import pandas as pd
+
+
+import matplotlib.pyplot as plt
+import keras_ocr
+import cv2
+import math
+import numpy as np
+
+class ultrasound_image_processor():
+    def __init__(self):
+        self.pipeline = keras_ocr.pipeline.Pipeline()
+
+
+    def midpoint(x1, y1, x2, y2):
+        x_mid = int((x1 + x2)/2)
+        y_mid = int((y1 + y2)/2)
+        return (x_mid, y_mid)
+
+    def inpaint_text(img_path, pipeline):
+        # read image
+        img = keras_ocr.tools.read(img_path)
+        # generate (word, box) tuples 
+        prediction_groups = pipeline.recognize([img])
+        mask = np.zeros(img.shape[:2], dtype="uint8")
+        for box in prediction_groups[0]:
+            x0, y0 = box[1][0]
+            x1, y1 = box[1][1] 
+            x2, y2 = box[1][2]
+            x3, y3 = box[1][3] 
+            
+            x_mid0, y_mid0 = midpoint(x1, y1, x2, y2)
+            x_mid1, y_mi1 = midpoint(x0, y0, x3, y3)
+            
+            thickness = int(math.sqrt( (x2 - x1)**2 + (y2 - y1)**2 ))
+            
+            cv2.line(mask, (x_mid0, y_mid0), (x_mid1, y_mi1), 255,    
+            thickness)
+
+            img = cv2.inpaint(img, mask, 1, cv2.INPAINT_NS)
+                    
+        return(img)
+
+    def ultrasound_image_processing(self, image, image_size_x, image_size_y, dims = None):
+
+        if dims == None:
+            # If no dimensions are provided, perform initial processing steps
+
+            # Remove 100 pixels from the right side of the image
+            img = image[:, :-100]
+
+            # Inpaint text in the image using an 'inpaint_text' function from an external source or library
+            img = inpaint_text(img, self.pipeline)
+
+            # Convert the image to grayscale
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # Resize the image to the specified dimensions
+            I1 = cv2.resize(img, (image_size_x, image_size_y))
+
+            # Apply blurring to the image
+            ksize = (1, 1)
+            blurred = cv2.blur(img, ksize)
+
+            # Apply Canny edge detection to the blurred image
+            canny = cv2.Canny(blurred, 50, 200)
+
+            # Get the coordinates of non-zero points in the Canny output
+            pts = np.argwhere(canny > 0)
+
+            # Filter the points based on the most frequent occurrence of the x-coordinate
+            filter = pts[:, 0] == np.bincount(pts[:, 0]).argmax()
+            filtered_pts = pts[filter]
+
+            # Find the minimum and maximum coordinates of the filtered points
+            y1, x1 = filtered_pts.min(axis=0)
+            y2, x2 = filtered_pts.max(axis=0)
+
+            # Crop the region of interest based on the calculated coordinates
+            cropped = img[y1:, x1:x2]
+
+            # Initialize row, xmin, and xmax variables
+            row = 0
+            xmin = x1
+            xmax = x2
+
+            # Check if there are any points with y-coordinate equal to 0
+            if np.sum(pts[:, 1] == 0) > 0:
+                # Crop the image from row 10 to the bottom
+                img = cropped[10:, :]
+
+                # Apply blurring to the cropped image
+                ksize = (3, 3)
+                blurred = cv2.blur(img, ksize)
+
+                # Apply Canny edge detection to the blurred image
+                canny = cv2.Canny(blurred, 10, 10)
+
+                # Get the coordinates of non-zero points in the Canny output
+                pts = np.argwhere(canny > 0)
+
+                # Find the minimum row and its corresponding x-coordinates
+                row = np.min(pts[:, 0])
+                x = pts[:, 0] == row
+                p = pts[x]
+                xmin = np.min(p[:, 1])
+                xmax = np.max(p[:, 1])
+
+                # Update the cropped image based on the new coordinates
+                cropped = img[row:, xmin:xmax]
+
+            # Resize the final cropped image to the specified dimensions
+            img = cv2.resize(cropped, (image_size_x, image_size_y))
+
+            # Store the calculated dimensions in a dictionary
+            dims = {'top': y1 + 10 + row, 'left': xmin, 'right': xmax}
+
+            # Return the processed image and the updated dimensions
+            return img, dims
+        
+        else:
+                # If dimensions are provided, perform processing based on the provided dimensions
+
+                # Inpaint text in the image using an 'inpaint_text' function from an external source or library
+                img = inpaint_text(image, self.pipeline)
+
+                # Convert the image to grayscale
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+                # Crop the image based on the provided dimensions
+                cropped = img[dims['top']:, dims['left']:dims['right']]
+
+                # Resize the cropped image to the specified dimensions
+                img = cv2.resize(cropped, (image_size_x, image_size_y))
+
+                # Return the processed image and the dimensions (no updates needed in this case)
+                return img, dims
