@@ -73,3 +73,133 @@ class PatchEmbedding(nn.Module):
 
         return x
 
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        super().__init__()
+
+        # Store the embedding dimension and the number of attention heads
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+
+        # Calculate the dimension of each head d
+        self.head_dim = embed_dim // num_heads
+
+        # Define the linear layer for projecting the input embeddings into query, key, and value tensors
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim * 3)
+
+        # Define the attention dropout layer to prevent overfitting during training
+        self.att_drop = nn.Dropout(0.1)
+
+        # Define the linear layer for projecting the concatenated output of the attention heads
+        self.proj = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        # Get the batch size, sequence length, and embedding dimension
+        B, N, E = x.shape
+
+        # Pass the input through the query, key, and value projection layer
+        qkv = self.qkv_proj(x)
+
+        # Reshape the output tensor and separate query, key, and value tensors
+        qkv = qkv.view(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # Calculate the attention scores by taking the dot product of the query and key tensors
+        attn = (q @ k.transpose(-2, -1)) 
+        
+        # Use a scaling factor to prevent vanishing gradients
+        attn *= (self.head_dim ** -0.5)
+
+        # Apply the softmax function to the attention scores
+        attn = nn.functional.softmax(attn, dim=-1)
+
+        # Apply dropout to the attention scores
+        attn = self.att_drop(attn)
+
+        # Calculate the output by taking the dot product of the attention scores and value tensors
+        x = (attn @ v).transpose(1, 2).contiguous().view(B, N, E)
+
+        # Pass the output through the projection layer
+        x = self.proj(x)
+
+        return x
+    
+    
+class TransformerEncoder(nn.Module):
+    def __init__(self, embed_dim, num_heads, mlp_dim):
+        super().__init__()
+
+        # Define the Multi-Head Self-Attention layer with the given embedding dimension and number of heads
+        self.attention = MultiHeadSelfAttention(embed_dim, num_heads)
+
+        # Define the first layer normalization for the residual connection after the attention layer
+        self.norm1 = nn.LayerNorm(embed_dim)
+
+        # Define the MLP (feed-forward) layer, which consists of two linear layers and a GELU activation
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim, mlp_dim),
+            nn.GELU(),
+            nn.Linear(mlp_dim, embed_dim)
+        )
+
+        # Define the second layer normalization for the residual connection after the MLP layer
+        self.norm2 = nn.LayerNorm(embed_dim)
+
+        # Define the dropout layer to prevent overfitting during training
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, x):
+        # Pass the input through the Multi-Head Self-Attention layer
+        attn_out = self.attention(x)
+
+        # Add the attention output to the input (residual connection) and apply layer normalization
+        x = x + self.dropout(attn_out)
+        x = self.norm1(x)
+
+        # Pass the normalized output through the MLP layer
+        mlp_out = self.mlp(x)
+
+        # Add the MLP output to the input (residual connection) and apply layer normalization
+        x = x + self.dropout(mlp_out)
+        x = self.norm2(x)
+
+        return x
+    
+class VisionTransformer(nn.Module):
+    def __init__(self, img_size, patch_size, in_channels, embed_dim, num_heads, mlp_dim, num_layers, num_classes, device):
+        super().__init__()
+
+        # Define the Patch Embedding layer, which divides the input image into patches and creates a sequence of embeddings
+        self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim, device)
+
+        # Define a sequence of Transformer Encoder layers
+        self.transformer_encoders = nn.Sequential(
+            *[TransformerEncoder(embed_dim, num_heads, mlp_dim) for _ in range(num_layers)]
+        )
+
+        # Define the class token, which is a learnable tensor that will be used to predict the class of the input image
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+
+        # Define the final layer normalization to stabilize the output of the Transformer Encoder layers
+        self.norm = nn.LayerNorm(embed_dim)
+
+        # Define the classification head, which is a linear layer that maps the class token to the number of output classes
+        self.head = nn.Linear(embed_dim, num_classes)
+
+    def forward(self, x):
+        # Pass the input image through the Patch Embedding layer to create a sequence of embeddings
+        x = self.patch_embed(x)
+
+        # Pass the sequence of embeddings through the Transformer Encoder layers
+        x = self.transformer_encoders(x)
+
+        # Extract the class token from the output sequence
+        cls_token = x[:, 0]
+
+        # Apply layer normalization to the class token
+        cls_token = self.norm(cls_token)
+
+        # Pass the class token through the classification head to compute the logits for each class
+        logits = self.head(cls_token)
+
+        return logits
