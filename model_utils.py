@@ -203,3 +203,89 @@ class VisionTransformer(nn.Module):
         logits = self.head(cls_token)
 
         return logits
+
+
+def patchify(batch, img_size, patch_size):
+    """
+    This code defines a function patchify that takes in a batch of images, the image size, and the patch size as inputs. It splits each image in the batch into patches of the specified patch size and returns a tensor containing all the flattened patches.
+
+    The function starts by calculating the number of steps needed to cover the entire image by dividing the image size by the patch size.
+    
+    Then, it initializes an empty list called output to store the flattened patches.
+    
+    The nested for loops iterate over each patch in the image. The loop variables i and j represent the current patch's position.
+    
+    Inside the loop, the code calculates the coordinates of the current patch's top left, top right, bottom left, and bottom right corners.
+    
+    Using these coordinates, it extracts the patch from the batch by slicing the tensor batch along the dimensions corresponding to the patch's coordinates.
+    
+    The patch tensor is then flattened using nn.Flatten(1) to collapse all dimensions except the batch dimension. An additional dimension is added by unsqueezing the tensor along the first dimension.
+    
+    The flattened patch is appended to the output list.
+    
+    After processing all the patches, the code concatenates all the flattened patches along the second dimension using torch.cat.
+    
+    Finally, the concatenated tensor is returned as the output of the patchify function.
+    """
+    # Calculate the number of steps needed to cover the entire image
+    step = int(img_size / patch_size)
+
+    output = []
+    for i in range(step):
+        for j in range(step):
+            # Calculate the coordinates of the current patch
+            t_l = i * patch_size  # Top left corner
+            t_r = (i + 1) * patch_size  # Top right corner
+            b_l = j * patch_size  # Bottom left corner
+            b_r = (j + 1) * patch_size  # Bottom right corner
+
+            # Extract the patch from the batch
+            patch = batch[:, :, t_l:t_r, b_l:b_r]
+
+            # Flatten the patch and add an extra dimension
+            flattened_patch = nn.Flatten(1)(patch).unsqueeze(1)
+
+            # Add the flattened patch to the output list
+            output += [flattened_patch]
+
+    # Concatenate all the flattened patches along the second dimension
+    output = torch.cat(output, dim=1)
+
+    return output
+
+
+def unpatchify(patches, img_size, patch_size, channels):
+    """
+    This code defines a function unpatchify that takes in a tensor of patches, the image size, patch size, and the number of channels as inputs. It reconstructs the original image from the patches and returns it.
+
+    The function begins by calculating the number of steps needed to cover the entire image by dividing the image size by the patch size. It also obtains the batch size from the patches tensor.
+    
+    An empty list called patch_list is initialized to store the reshaped patches.
+    
+    The loop iterates over the second-to-last dimension of the patches tensor. This dimension corresponds to the patches' indices.
+    
+    Within the loop, each patch is reshaped to its original dimensions using the reshape function. The reshaped patch is added to the patch_list.
+    
+    After processing all the patches, the code constructs the rows of the image. It uses another loop to iterate over the range of steps.
+    
+    Within each iteration, a sublist of patches corresponding to a row is extracted from the patch_list using slicing. The sublists are then concatenated along the last dimension (-1) using torch.cat.
+    
+    The resulting rows of patches are stored in the img_rows list.
+    
+    Finally, the rows of patches are concatenated along the second-to-last dimension (-2) using torch.cat to reconstruct the original image. The reconstructed image is returned as the output of the unpatchify function.
+    """
+    # Calculate the number of steps needed to cover the entire image
+    step = int(img_size / patch_size)
+    batch_size = patches.shape[0]
+
+    patch_list = []
+    for i in range(patches.shape[-2]):
+        # Reshape each patch to its original dimensions
+        patch_list += [patches[:, i].reshape(batch_size, channels, patch_size, patch_size)]
+
+    img_rows = [torch.cat(patch_list[i * step:(i * step) + step], -1) for i in range(step)]
+
+    # Concatenate all the rows of patches to reconstruct the image
+    img = torch.cat(img_rows, -2)
+
+    return img
