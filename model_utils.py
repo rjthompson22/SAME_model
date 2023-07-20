@@ -289,3 +289,49 @@ def unpatchify(patches, img_size, patch_size, channels):
     img = torch.cat(img_rows, -2)
 
     return img
+
+
+from random import randint
+
+def mask_patches(input, percent, verbose=False):
+    """
+    The code defines a function mask_patches that takes an input tensor, a percentage of patches to mask, and an optional verbose flag as inputs. It masks a specified percentage of patches from the input tensor by setting their values to -1.
+
+    The function starts by determining the range of indices for patch selection, which is from 0 to the last index of the input tensor.
+    
+    Then, it calculates the number of patches to be masked based on the input percentage.
+    
+    Next, the function generates 'count' number of random indices within the specified range. The randint function from the random module is used for this purpose.
+    
+    A copy of the input tensor is created using the clone method. This ensures that the original tensor remains unchanged.
+    
+    The selected patch indices are masked by setting the corresponding values in the tensor to -1.
+    
+    If the verbose flag is set to True, the function prints information about the masked patches, including the indices, the number of indices, and the values of the first patch from the first dimension.
+    
+    Finally, the masked tensor is returned as the output of the function. Note that the function does not modify the original input tensor; it returns a new tensor with the patches masked.
+    """
+    # Determine the range of indices for patch selection
+    start, stop = 0, input.shape[1] - 1
+
+    # Calculate the number of patches to be masked
+    count = int(input.shape[1] * percent)
+
+    # Randomly select 'count' number of patch indices
+    indices = [randint(start, stop) for i in range(count)]
+
+    # Create a copy of the input tensor to mask patches
+    masked = input.clone()
+
+    # Set the values of selected patches to -1
+    masked[:, indices, :] = -1
+
+    if verbose:
+        print(f"{'-'*100}")
+        print("MASKED PATCHES")
+        print(indices)
+        print(len(indices))
+        print(masked[0, indices, 0])
+        print(f"{'-'*100}")
+
+    return masked
